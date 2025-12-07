@@ -36,15 +36,15 @@ services:
   # FastAPI Backend
   backend:
     build:
-      context: ./backend
+      context: ./wishlist-api
       dockerfile: Dockerfile.dev
     container_name: fastapi-dev
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
+      -./wishlist-api:/app
     env_file:
-      - ./backend/.env.docker
+      - ./wishlist-api/.env.docker
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,16 +55,16 @@ services:
   # Vue Frontend
   frontend:
     build:
-      context: ./frontend
+      context: ./wishlist-ui
       dockerfile: Dockerfile.dev
     container_name: vue-frontend-dev
     ports:
       - "5173:5173"
     volumes:
-      - ./frontend:/app
+      - ./wishlist-ui:/app
       - /app/node_modules
     env_file:
-      - ./frontend/.env.docker
+      - ./wishlist-ui/.env.docker
     depends_on:
       - backend
     command: npm run dev -- --host 0.0.0.0
