@@ -1,5 +1,6 @@
 import os
-
+import json
+import redis
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -7,8 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import List
-import redis
-import json
 
 from database import get_db, engine
 from models import Base, User, WishList, WishItem, WishItemStatus
@@ -23,26 +22,22 @@ from crud import (
     get_item_statuses
 )
 
+# Створюємо таблиці при запуску (важливо для Render)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Wish List API", version="1.0.0")
 
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-
+# Завантажуємо .env файли (для локальної розробки)
 load_dotenv(override=False)
 
+# --- Налаштування змінних оточення ---
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
 
+# Перетворюємо рядок дозволених доменів на список
 origins = [origin.strip() for origin in ALLOWED_ORIGINS.split(",")]
 
+# --- Налаштування CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -51,28 +46,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- БУЛО ---
-# REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-# redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-
-# --- СТАЛО ---
+# --- ІНІЦІАЛІЗАЦІЯ REDIS (Production-Ready) ---
+REDIS_URL = os.getenv("REDIS_URL") 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
 
-# Формуємо URL динамічно
-REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
+if ENVIRONMENT == "production" and REDIS_URL:
+    # Production: використовуємо повний URL (з Upstash), 
+    # вимикаємо перевірку сертифіката для простоти (ssl_cert_reqs=None)
+    redis_client = redis.from_url(
+        REDIS_URL, 
+        decode_responses=True,
+        ssl_cert_reqs=None 
+    )
+else:
+    # Development/Local: використовуємо окремі змінні або localhost
+    LOCAL_REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}"
+    
+    redis_client = redis.from_url(
+        LOCAL_REDIS_URL, 
+        decode_responses=True
+    )
+# --- Кінець ініціалізації Redis ---
 
-redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-# ssl_cert_reqs="none" - Disable SSL certificate verification for Upstash
-
-
-
-# redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-
-# docker run -d \
-#   --name redis \
-#   -p 6379:6379 \
-#   redis:7-alpine
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -281,13 +277,14 @@ async def get_item_status_history(
     return serialized_statuses
 
 
-
+# --- Health Check (Використовується Render для моніторингу) ---
 @app.get("/health")
 async def health_check():
     try:
+        # Перевірка підключення до Redis
         redis_client.ping()
         redis_status = "healthy"
-    except:
+    except Exception:
         redis_status = "unhealthy"
 
     return {
